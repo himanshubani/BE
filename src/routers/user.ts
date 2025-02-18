@@ -7,9 +7,14 @@ import { authMiddleware } from "../middleware";
 import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { createTaskInput } from "../types";
 import nacl from "tweetnacl";
-import { PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey, Transaction } from "@solana/web3.js";
+import { any } from "zod";
 
 const DEFAULT_TITLE = "Select the most clickable thumbnail";
+
+const connection = new Connection(process.env.RPC_URL ?? "");
+
+const PARENT_WALLET_ADDRESS = "6XWGqsxcdEpDHFrnbNpy4PvdGc13PJT3zSUVZaF2CTTL";
 
 const s3Client = new S3Client({
   credentials: {
@@ -84,19 +89,51 @@ router.get("/task", authMiddleware, async (req, res) => {
 })
 
 router.post("/task", authMiddleware, async (req, res) => {
-  const body = req.body;
   //@ts-ignore
   const userId = req.userId;
+  const body = req.body;
+
+  // Validate the inputs from the user
   const parseData = createTaskInput.safeParse(body);
+
   if (!parseData.success) {
-    res.status(400).json({ error: parseData.error });
+     res.status(411).json({
+      message: "You've sent the wrong inputs",
+    });
   }
 
+  // Fetch the user's wallet address
+  const user = await prismaClient.user.findFirst({
+    where: {
+      id: userId,
+    },
+  });
+
+  if (!user) {
+     res.status(404).json({
+      message: "User not found",
+    });
+  }
+
+  // Check if the signature has already been used
+  const existingTask = await prismaClient.task.findFirst({
+    where: {
+      signature: parseData.data?.signature,
+    },
+  });
+
+  if (existingTask) {
+     res.status(411).json({
+      message: "Transaction signature already used",
+    });
+  }
+
+  // Create the task
   let response = await prismaClient.$transaction(async (tx) => {
     const response = await tx.task.create({
       data: {
         title: parseData.data?.title ?? DEFAULT_TITLE,
-        amount: 1 * TOTAL_DECIMALS,
+        amount: 0.1 * TOTAL_DECIMALS,
         signature: parseData.data?.signature ?? "",
         user_id: userId,
       },
@@ -104,14 +141,15 @@ router.post("/task", authMiddleware, async (req, res) => {
 
     await tx.option.createMany({
       data:
-        parseData.data?.options?.map((option: any) => ({
-          image_url: option.imageUrl,
+        parseData.data?.options?.map((x: any) => ({
+          image_url: x.imageUrl,
           task_id: response.id,
         })) ?? [],
     });
 
     return response;
   });
+
   res.json({
     id: response.id,
   });
