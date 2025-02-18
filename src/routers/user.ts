@@ -1,16 +1,13 @@
 import { PrismaClient } from "@prisma/client";
 import { Router } from "express";
-import {
-  S3Client,
-  GetObjectCommand,
-  PutObjectCommand,
-} from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import {S3Client,} from "@aws-sdk/client-s3";
 import jwt from "jsonwebtoken";
 import { JWT_SECRET, TOTAL_DECIMALS } from "../config";
 import { authMiddleware } from "../middleware";
 import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { createTaskInput } from "../types";
+import nacl from "tweetnacl";
+import { PublicKey } from "@solana/web3.js";
 
 const DEFAULT_TITLE = "Select the most clickable thumbnail";
 
@@ -144,9 +141,20 @@ router.get("/presignedUrl", authMiddleware, async (req, res) => {
 });
 
 router.post("/signin", async (req, res) => {
-  const hardcodedWalletAddress = "By6kpYivWkzyeYkc48Ges45z1MQB8JaUWb1TeAMiZCwx";
+  const { publicKey, signature } = req.body;
+  const signedString = "sign into mechanical turks";
+  const message = new TextEncoder().encode("Sign into mechanical turks");
+
+  const result = nacl.sign.detached.verify(
+    message,
+    new Uint8Array(signature.data),
+    new PublicKey(publicKey).toBytes()
+  ); // Verify the signature
+
+  console.log("Signature verification result:", result);
+
   const existingUser = await prismaClient.user.findFirst({
-    where: { address: hardcodedWalletAddress },
+    where: { address: publicKey },
   });
 
   if (existingUser) {
@@ -160,7 +168,7 @@ router.post("/signin", async (req, res) => {
   } else {
     const user = await prismaClient.user.create({
       data: {
-        address: hardcodedWalletAddress,
+        address: publicKey,
       },
     });
 
