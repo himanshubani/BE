@@ -165,6 +165,10 @@ router.post("/submission", workerMiddleware, async (req, res) => {
             nextTask,
             amount
         })
+    } else{
+        res.status(400).json({
+            message: "Invalid input"
+        });
     }
 
 });
